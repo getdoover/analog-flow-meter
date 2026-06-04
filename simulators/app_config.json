@@ -1,5 +1,12 @@
 {
-    "digital_outputs_enabled": true,
-    "a_funny_message": "yeeha",
+    "meter_mode": "Analog",
+    "flow_units": "L",
+    "flow_rate_time_base": "Per Hour",
+    "maximum_flow": 1000,
+    "flow_decimal_precision": 1,
+    "polling_frequency": 1.0,
+    "totaliser_calibration_factor": 1.0,
+    "event_flow_threshold": 50,
+    "event_timeout_minutes": 0.5,
     "simulator_app_key": "sim_app_key"
 }

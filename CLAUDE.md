@@ -1,6 +1,9 @@
-# Doover App Template
+# Analog Flow Meter
 
-A template for building device applications on the Doover IoT platform using pydoover 1.0.
+A Doover device app (built on pydoover 1.0) that reads flow from either an
+**analog input** (generic linear scaling, e.g. 4-20mA / 0-10V) or by **counting
+digital pulses** (K-factor, pulses per unit). It publishes a live flow rate and
+a calibratable totaliser, and tracks discrete **flow sessions** (events).
 
 ## Commands
 
@@ -14,16 +17,34 @@ doover app run                   # Run app + simulator locally via docker-compos
 ## Project Structure
 
 ```
-src/app_template/
-  __init__.py        # Entry point — run_app(SampleApplication())
-  application.py     # Main app class (setup, main_loop, UI handlers)
-  app_config.py      # Config schema — class-level declarations
-  app_tags.py        # Runtime state tags — bound to UI elements
-  app_ui.py          # UI definition — subclasses ui.UI
-  app_state.py       # State machine using pydoover.state.StateMachine
-simulators/sample/   # Simulator app that produces test data
-tests/               # pytest suite
+src/analog_flow_meter/
+  __init__.py        # Entry point — run_app(FlowMeterApplication())
+  application.py     # Main app: reads analog/pulse flow, totalises, tracks sessions
+  app_config.py      # Config schema — mode, units, calibration, pins (class-level)
+  app_tags.py        # Tags — flow_rate & totaliser are live + published
+  app_ui.py          # UI — TabContainer: "Flow" (radial gauge) + "Events" tabs
+  app_state.py       # FlowSessionState (idle ↔ flowing) via pydoover.state.StateMachine
+simulators/sample/   # Flow simulator publishing a `sim_flow_rate` tag for local dev
+tests/               # pytest suite (schema, UI, scaling/totaliser maths)
 ```
+
+## How it works
+
+- **Mode** (`meter_mode` config) selects Analog or Pulse.
+- **Analog**: `platform_iface.fetch_ai(pin)` → linear scale (`scale_analog`) between
+  configured signal/flow endpoints → flow rate; the totaliser **integrates**
+  `rate × dt`.
+- **Pulse**: `platform_iface.start_di_pulse_listener(pin, on_pulse, edge)` keeps a
+  lifetime `pulse_count`; the totaliser is **derived** as
+  `(pulse_count − pulse_offset) / k_factor × calibration`. Missed pulses are
+  recovered on restart via `fetch_di_events`.
+- **Rate display** is volume per configurable time base (default `L/hr`); the
+  radial gauge range is calibrated to `maximum_flow` at runtime in `UI.setup()`.
+- **Simulation**: when `simulator_app_key` is set, flow is read from that app's
+  `sim_flow_rate` tag instead of hardware (used by `doover app run`).
+- **Events**: a flow session opens when rate exceeds `event_flow_threshold` and
+  closes after `event_timeout` minutes below it; closed sessions publish a
+  message to the `significantEvent` channel.
 
 ## pydoover 1.0 Patterns
 

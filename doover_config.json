@@ -1,17 +1,16 @@
 {
-    "sample_application": {
-        "key": "32134bbb-5278-43c0-a6ca-4046a5edeb9f",
-        "name": "sample_application",
-        "display_name": "Sample Application",
+    "analog_flow_meter": {
+        "name": "analog_flow_meter",
+        "display_name": "Analog Flow Meter",
         "type": "DEV",
         "visibility": "PUB",
         "allow_many": true,
-        "description": "A template application for Doover",
+        "description": "Read flow from an analog input or by counting digital pulses, with a calibratable totaliser and flow-event tracking.",
         "long_description": "README.md",
         "depends_on": [],
         "owner_org_key": "",
-        "image_name": "ghcr.io/getdoover/app-template:main",
-        "container_registry_profile_key": "",
+        "container_registry_profile_id": 93955828574386692,
+        "image_name": "ghcr.io/getdoover/analog-flow-meter:main",
         "build_args": "--platform linux/amd64,linux/arm64",
         "config_schema": {
             "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -19,42 +18,337 @@
             "title": "$default",
             "type": "object",
             "properties": {
-                "digital_outputs_enabled": {
-                    "title": "Digital Outputs Enabled",
-                    "x-name": "digital_outputs_enabled",
+                "meter_mode": {
+                    "enum": [
+                        "Analog",
+                        "Pulse"
+                    ],
+                    "title": "Meter Mode",
+                    "x-name": "meter_mode",
                     "x-hidden": false,
                     "type": [
-                        "boolean",
+                        "string",
                         "null"
                     ],
                     "x-required": false,
-                    "default": true,
+                    "description": "How flow is measured: an analog input (e.g. 4-20mA / 0-10V) or by counting digital pulses.",
+                    "default": "Analog",
                     "x-position": 0
                 },
-                "a_funny_message": {
-                    "title": "A Funny Message",
-                    "x-name": "a_funny_message",
+                "flow_units": {
+                    "title": "Flow Units",
+                    "x-name": "flow_units",
                     "x-hidden": false,
-                    "type": "string",
-                    "x-required": true,
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "x-required": false,
+                    "description": "Volume units for flow and totaliser (e.g. L, kL, gal, m3).",
+                    "default": "L",
                     "x-position": 1
+                },
+                "flow_rate_time_base": {
+                    "enum": [
+                        "Per Second",
+                        "Per Minute",
+                        "Per Hour",
+                        "Per Day"
+                    ],
+                    "title": "Flow Rate Time Base",
+                    "x-name": "flow_rate_time_base",
+                    "x-hidden": false,
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "x-required": false,
+                    "description": "Time base for the displayed flow rate (e.g. Per Hour shows L/hr, Per Day shows ML/day for megalitre units).",
+                    "default": "Per Hour",
+                    "x-position": 2
+                },
+                "maximum_flow": {
+                    "title": "Maximum Flow",
+                    "x-name": "maximum_flow",
+                    "x-hidden": false,
+                    "type": [
+                        "number",
+                        "null"
+                    ],
+                    "x-required": false,
+                    "description": "Full-scale flow used to calibrate the radial gauge range, in flow units per the selected time base.",
+                    "default": 1000.0,
+                    "x-position": 3,
+                    "minimum": 0
+                },
+                "flow_decimal_precision": {
+                    "title": "Flow Decimal Precision",
+                    "x-name": "flow_decimal_precision",
+                    "x-hidden": false,
+                    "type": [
+                        "integer",
+                        "null"
+                    ],
+                    "x-required": false,
+                    "description": "Number of decimal places shown for the flow rate.",
+                    "default": 1,
+                    "x-position": 4,
+                    "minimum": 0
+                },
+                "polling_frequency": {
+                    "title": "Polling Frequency",
+                    "x-name": "polling_frequency",
+                    "x-hidden": false,
+                    "type": [
+                        "number",
+                        "null"
+                    ],
+                    "x-required": false,
+                    "description": "How often to sample the meter and update the totaliser (Hz).",
+                    "default": 1.0,
+                    "x-position": 5,
+                    "minimum": 0
+                },
+                "analog_input_pin": {
+                    "title": "Analog Input Pin",
+                    "x-name": "analog_input_pin",
+                    "x-hidden": false,
+                    "type": [
+                        "integer",
+                        "null"
+                    ],
+                    "x-required": false,
+                    "description": "[Analog mode] Analog input pin the flow transmitter is wired to.",
+                    "default": 0,
+                    "x-position": 6,
+                    "minimum": 0
+                },
+                "signal_at_minimum_flow": {
+                    "title": "Signal at Minimum Flow",
+                    "x-name": "signal_at_minimum_flow",
+                    "x-hidden": false,
+                    "type": [
+                        "number",
+                        "null"
+                    ],
+                    "x-required": false,
+                    "description": "[Analog mode] Raw signal (mA or V) corresponding to the minimum flow.",
+                    "default": 4.0,
+                    "x-position": 7
+                },
+                "signal_at_maximum_flow": {
+                    "title": "Signal at Maximum Flow",
+                    "x-name": "signal_at_maximum_flow",
+                    "x-hidden": false,
+                    "type": [
+                        "number",
+                        "null"
+                    ],
+                    "x-required": false,
+                    "description": "[Analog mode] Raw signal (mA or V) corresponding to the maximum flow.",
+                    "default": 20.0,
+                    "x-position": 8
+                },
+                "flow_at_minimum_signal": {
+                    "title": "Flow at Minimum Signal",
+                    "x-name": "flow_at_minimum_signal",
+                    "x-hidden": false,
+                    "type": [
+                        "number",
+                        "null"
+                    ],
+                    "x-required": false,
+                    "description": "[Analog mode] Flow rate (units per time base) at the minimum signal.",
+                    "default": 0.0,
+                    "x-position": 9
+                },
+                "flow_at_maximum_signal": {
+                    "title": "Flow at Maximum Signal",
+                    "x-name": "flow_at_maximum_signal",
+                    "x-hidden": false,
+                    "type": [
+                        "number",
+                        "null"
+                    ],
+                    "x-required": false,
+                    "description": "[Analog mode] Flow rate (units per time base) at the maximum signal.",
+                    "default": 1000.0,
+                    "x-position": 10
+                },
+                "signal_deadband": {
+                    "title": "Signal Deadband",
+                    "x-name": "signal_deadband",
+                    "x-hidden": false,
+                    "type": [
+                        "number",
+                        "null"
+                    ],
+                    "x-required": false,
+                    "description": "[Analog mode] Signal below (signal_min - deadband) is treated as a fault/disconnected and ignored rather than read as flow.",
+                    "default": 0.5,
+                    "x-position": 11,
+                    "minimum": 0
+                },
+                "sensor_power_pin": {
+                    "title": "Sensor Power Pin",
+                    "x-name": "sensor_power_pin",
+                    "x-hidden": false,
+                    "type": [
+                        "integer",
+                        "null"
+                    ],
+                    "x-required": false,
+                    "description": "[Analog mode] Optional digital output pin used to power the transmitter.",
+                    "default": null,
+                    "x-position": 12,
+                    "minimum": 0
+                },
+                "digital_input_pin": {
+                    "title": "Digital Input Pin",
+                    "x-name": "digital_input_pin",
+                    "x-hidden": false,
+                    "type": [
+                        "integer",
+                        "null"
+                    ],
+                    "x-required": false,
+                    "description": "[Pulse mode] Digital input pin the meter's pulse output is wired to.",
+                    "default": 0,
+                    "x-position": 13,
+                    "minimum": 0
+                },
+                "kfactor_pulses_per_unit": {
+                    "title": "K-Factor (pulses per unit)",
+                    "x-name": "kfactor_pulses_per_unit",
+                    "x-hidden": false,
+                    "type": [
+                        "number",
+                        "null"
+                    ],
+                    "x-required": false,
+                    "description": "[Pulse mode] Pulses emitted per one unit of volume, from the meter's spec sheet. Volume = pulses / K-factor.",
+                    "default": 1.0,
+                    "x-position": 14,
+                    "minimum": 0
+                },
+                "pulse_edge": {
+                    "enum": [
+                        "rising",
+                        "falling"
+                    ],
+                    "title": "Pulse Edge",
+                    "x-name": "pulse_edge",
+                    "x-hidden": false,
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "x-required": false,
+                    "description": "[Pulse mode] Signal edge that constitutes one pulse.",
+                    "default": "rising",
+                    "x-position": 15
+                },
+                "pulse_rate_averaging_window": {
+                    "title": "Pulse Rate Averaging Window",
+                    "x-name": "pulse_rate_averaging_window",
+                    "x-hidden": false,
+                    "type": [
+                        "number",
+                        "null"
+                    ],
+                    "x-required": false,
+                    "description": "[Pulse mode] Seconds of pulses to average when computing the displayed flow rate. Larger values smooth a jumpy gauge at low flow; smaller values respond faster. Does not affect the totaliser.",
+                    "default": 10.0,
+                    "x-position": 16,
+                    "minimum": 0
+                },
+                "totaliser_calibration_factor": {
+                    "title": "Totaliser Calibration Factor",
+                    "x-name": "totaliser_calibration_factor",
+                    "x-hidden": false,
+                    "type": [
+                        "number",
+                        "null"
+                    ],
+                    "x-required": false,
+                    "description": "Multiplier applied to the totaliser to trim it against a reference meter (1.0 = no adjustment).",
+                    "default": 1.0,
+                    "x-position": 17,
+                    "minimum": 0
+                },
+                "totaliser_decimal_precision": {
+                    "title": "Totaliser Decimal Precision",
+                    "x-name": "totaliser_decimal_precision",
+                    "x-hidden": false,
+                    "type": [
+                        "integer",
+                        "null"
+                    ],
+                    "x-required": false,
+                    "description": "Decimal places shown for the totaliser and event volumes. Increase for small-volume units like m3 or kL.",
+                    "default": 0,
+                    "x-position": 18,
+                    "minimum": 0
+                },
+                "event_flow_threshold": {
+                    "title": "Event Flow Threshold",
+                    "x-name": "event_flow_threshold",
+                    "x-hidden": false,
+                    "type": [
+                        "number",
+                        "null"
+                    ],
+                    "x-required": false,
+                    "description": "Flow rate (units per time base) above which a flow session is considered active. Set this above your sensor's zero/noise floor \u2014 with analog sensors, leaving it at 0 keeps a session open forever on baseline noise (flow rarely reads exactly zero).",
+                    "default": 1.0,
+                    "x-position": 19,
+                    "minimum": 0
+                },
+                "event_timeout_minutes": {
+                    "title": "Event Timeout (minutes)",
+                    "x-name": "event_timeout_minutes",
+                    "x-hidden": false,
+                    "type": [
+                        "number",
+                        "null"
+                    ],
+                    "x-required": false,
+                    "description": "Minutes of flow at or below the threshold before an active flow session is closed and recorded.",
+                    "default": 5.0,
+                    "x-position": 20,
+                    "minimum": 0
                 },
                 "simulator_app_key": {
                     "title": "Simulator App Key",
                     "x-name": "simulator_app_key",
                     "x-hidden": false,
                     "format": "doover-resource-application",
-                    "type": "string",
-                    "x-required": true,
-                    "description": "The app key for the simulator",
-                    "x-position": 2
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "x-required": false,
+                    "description": "Optional: app key of a simulator publishing a 'sim_flow_rate' tag. When set, flow is read from that tag instead of hardware (local testing).",
+                    "default": null,
+                    "x-position": 21
+                },
+                "dv_app_position": {
+                    "title": "Position",
+                    "x-name": "dv_app_position",
+                    "x-hidden": true,
+                    "type": [
+                        "integer",
+                        "null"
+                    ],
+                    "x-required": false,
+                    "description": "Position of Application in UI Structure. Smaller numbers are closer to the top.",
+                    "default": 100,
+                    "x-position": 22,
+                    "minimum": 0
                 }
             },
             "additionalElements": true,
-            "required": [
-                "a_funny_message",
-                "simulator_app_key"
-            ]
+            "required": []
         },
         "ui_schema": {
             "displayString": "$config.app().APP_DISPLAY_NAME",
@@ -62,139 +356,181 @@
             "position": "$config.app().dv_app_position:number:100",
             "icon": null,
             "colour": null,
-            "defaultOpen": false,
+            "defaultOpen": "$config.app().dv_app_default_open:boolean",
             "type": "uiApplication",
             "name": "$config.app().APP_KEY",
             "children": {
-                "is_working": {
-                    "name": "is_working",
-                    "type": "uiVariable",
-                    "displayString": "We Working?",
+                "tabs": {
+                    "name": "tabs",
+                    "type": "uiTabs",
+                    "displayString": "Tabs",
                     "showActivity": true,
-                    "position": 51,
-                    "hidden": false,
-                    "varType": "bool",
-                    "currentValue": "$tag.app().is_working:boolean:false"
-                },
-                "uptime": {
-                    "name": "uptime",
-                    "type": "uiVariable",
-                    "displayString": "Uptime",
-                    "showActivity": true,
-                    "position": 52,
-                    "hidden": false,
-                    "varType": "float",
-                    "currentValue": "$tag.app().uptime:number:0"
-                },
-                "send_alert": {
-                    "name": "send_alert",
-                    "type": "uiButton",
-                    "displayString": "Send message as alert",
-                    "position": 1,
-                    "hidden": false,
-                    "currentValue": "$cmds.app().send_alert",
-                    "appKey": "$config.app().APP_KEY"
-                },
-                "test_message": {
-                    "name": "test_message",
-                    "type": "uiTextInput",
-                    "displayString": "Put in a message",
-                    "position": 54,
-                    "hidden": false,
-                    "currentValue": "$cmds.app().test_message",
-                    "appKey": "$config.app().APP_KEY",
-                    "isTextArea": false
-                },
-                "test_output": {
-                    "name": "test_output",
-                    "type": "uiVariable",
-                    "displayString": "This is message we got",
-                    "showActivity": true,
-                    "position": 55,
-                    "hidden": false,
-                    "varType": "string",
-                    "currentValue": "$tag.app().test_output:string:\"\""
-                },
-                "battery": {
-                    "name": "battery",
-                    "type": "uiSubmodule",
-                    "displayString": "Battery Module",
-                    "showActivity": true,
-                    "position": 59,
+                    "position": 63,
                     "hidden": false,
                     "children": {
-                        "voltage": {
-                            "name": "voltage",
-                            "type": "uiVariable",
-                            "displayString": "Battery Voltage",
+                        "flow_tab": {
+                            "name": "flow_tab",
+                            "type": "uiContainer",
+                            "displayString": "Flow",
                             "showActivity": true,
-                            "position": 56,
+                            "position": 55,
                             "hidden": false,
-                            "varType": "float",
-                            "currentValue": "$tag.app().battery_voltage:number:0",
-                            "decPrecision": 2,
-                            "ranges": [
-                                {
-                                    "min": 0,
-                                    "max": 10,
-                                    "colour": "red",
-                                    "show_on_graph": true,
-                                    "label": "Low"
+                            "children": {
+                                "sensor_fault": {
+                                    "name": "sensor_fault",
+                                    "type": "uiWarningIndicator",
+                                    "displayString": "Sensor signal out of range",
+                                    "position": 5,
+                                    "hidden": "$tag.app().sensor_fault_hidden:boolean:true",
+                                    "currentValue": "$cmds.app().sensor_fault",
+                                    "can_cancel": true
                                 },
-                                {
-                                    "min": 10,
-                                    "max": 20,
-                                    "colour": "green",
-                                    "show_on_graph": true,
-                                    "label": "Normal"
+                                "flow_rate": {
+                                    "name": "flow_rate",
+                                    "type": "uiVariable",
+                                    "displayString": "Flow Rate",
+                                    "showActivity": true,
+                                    "form": "radialGauge",
+                                    "position": 10,
+                                    "hidden": false,
+                                    "varType": "float",
+                                    "currentValue": "$tag.app().flow_rate:number:0.0",
+                                    "decPrecision": 1,
+                                    "ranges": [
+                                        {
+                                            "min": 0,
+                                            "max": 200,
+                                            "colour": "blue",
+                                            "show_on_graph": true,
+                                            "label": "Low"
+                                        },
+                                        {
+                                            "min": 200,
+                                            "max": 800,
+                                            "colour": "green",
+                                            "show_on_graph": true,
+                                            "label": "Normal"
+                                        },
+                                        {
+                                            "min": 800,
+                                            "max": 1000,
+                                            "colour": "yellow",
+                                            "show_on_graph": true,
+                                            "label": "High"
+                                        }
+                                    ],
+                                    "live": true
                                 },
-                                {
-                                    "min": 20,
-                                    "max": 30,
-                                    "colour": "blue",
-                                    "show_on_graph": true,
-                                    "label": "High"
+                                "totaliser": {
+                                    "name": "totaliser",
+                                    "type": "uiVariable",
+                                    "displayString": "Totaliser",
+                                    "showActivity": true,
+                                    "position": 20,
+                                    "hidden": false,
+                                    "varType": "float",
+                                    "currentValue": "$tag.app().totaliser:number:0.0",
+                                    "decPrecision": 0,
+                                    "live": true
+                                },
+                                "reset_totaliser": {
+                                    "name": "reset_totaliser",
+                                    "type": "uiButton",
+                                    "displayString": "Reset Totaliser",
+                                    "position": 30,
+                                    "hidden": false,
+                                    "currentValue": "$cmds.app().reset_totaliser"
                                 }
-                            ]
+                            }
                         },
-                        "low_voltage_alert": {
-                            "name": "low_voltage_alert",
-                            "type": "uiFloatInput",
-                            "displayString": "Low Voltage Alert",
-                            "position": 57,
+                        "events_tab": {
+                            "name": "events_tab",
+                            "type": "uiContainer",
+                            "displayString": "Events",
+                            "showActivity": true,
+                            "position": 62,
                             "hidden": false,
-                            "currentValue": "$cmds.app().low_voltage_alert",
-                            "appKey": "$config.app().APP_KEY"
-                        },
-                        "charge_mode": {
-                            "name": "charge_mode",
-                            "type": "uiSelect",
-                            "displayString": "Charge Mode",
-                            "position": 58,
-                            "hidden": false,
-                            "currentValue": "$cmds.app().charge_mode",
-                            "appKey": "$config.app().APP_KEY",
-                            "options": {
-                                "charge": {
-                                    "name": "charge",
-                                    "displayString": "Charge",
-                                    "type": "uiElement"
+                            "children": {
+                                "flow_active": {
+                                    "name": "flow_active",
+                                    "type": "uiVariable",
+                                    "displayString": "Flow Active",
+                                    "showActivity": true,
+                                    "position": 10,
+                                    "hidden": false,
+                                    "varType": "bool",
+                                    "currentValue": "$tag.app().flow_active:boolean:false"
                                 },
-                                "discharge": {
-                                    "name": "discharge",
-                                    "displayString": "Discharge",
-                                    "type": "uiElement"
+                                "event_started": {
+                                    "name": "event_started",
+                                    "type": "uiTimestamp",
+                                    "displayString": "Current Event Started",
+                                    "showActivity": true,
+                                    "position": 20,
+                                    "hidden": false,
+                                    "varType": "timestamp",
+                                    "currentValue": "$tag.app().event_started:number:null"
                                 },
-                                "idle": {
-                                    "name": "idle",
-                                    "displayString": "Idle",
-                                    "type": "uiElement"
+                                "event_volume": {
+                                    "name": "event_volume",
+                                    "type": "uiVariable",
+                                    "displayString": "Current Event Volume",
+                                    "showActivity": true,
+                                    "position": 30,
+                                    "hidden": false,
+                                    "varType": "float",
+                                    "currentValue": "$tag.app().event_volume:number:0.0",
+                                    "decPrecision": 0
+                                },
+                                "event_peak_flow": {
+                                    "name": "event_peak_flow",
+                                    "type": "uiVariable",
+                                    "displayString": "Current Event Peak Flow",
+                                    "showActivity": true,
+                                    "position": 40,
+                                    "hidden": false,
+                                    "varType": "float",
+                                    "currentValue": "$tag.app().event_peak_flow:number:0.0",
+                                    "decPrecision": 1
+                                },
+                                "last_event_summary": {
+                                    "name": "last_event_summary",
+                                    "type": "uiVariable",
+                                    "displayString": "Last Event",
+                                    "showActivity": true,
+                                    "position": 50,
+                                    "hidden": false,
+                                    "varType": "string",
+                                    "currentValue": "$tag.app().last_event_summary:string:\"\""
+                                },
+                                "reset_event": {
+                                    "name": "reset_event",
+                                    "type": "uiButton",
+                                    "displayString": "Reset Current Event",
+                                    "position": 60,
+                                    "hidden": false,
+                                    "currentValue": "$cmds.app().reset_event"
                                 }
                             }
                         }
                     }
                 }
             }
-        }
+        },
+        "organisation_id": null,
+        "id": 188129882880872463,
+        "key": null,
+        "owner_org_id": null,
+        "code_repo_id": null,
+        "repo_branch": "main",
+        "lambda_config": null,
+        "icon_url": null,
+        "banner_url": null,
+        "staging_config": {},
+        "build_widget_command": null,
+        "export_config_command": null,
+        "export_ui_command": null,
+        "run_command": null,
+        "lambda_arn": null
     }
 }
