@@ -30,10 +30,14 @@ class FlowMeterUI(ui.UI):
                         hidden=FlowMeterTags.sensor_fault_hidden,
                         position=5,
                     ),
+                    # NOTE: units / precision / ranges below are the defaults
+                    # baked into the static schema. UI.setup() overrides them
+                    # at runtime from config (units, time base, max flow).
                     ui.NumericVariable(
                         "Flow Rate",
                         value=FlowMeterTags.flow_rate,
                         name="flow_rate",
+                        units="L/hr",
                         precision=1,
                         form=ui.Widget.radial,
                         ranges=[
@@ -47,6 +51,7 @@ class FlowMeterUI(ui.UI):
                         "Totaliser",
                         value=FlowMeterTags.totaliser,
                         name="totaliser",
+                        units="L",
                         precision=0,
                         position=20,
                     ),
@@ -73,6 +78,7 @@ class FlowMeterUI(ui.UI):
                         "Current Event Volume",
                         value=FlowMeterTags.event_volume,
                         name="event_volume",
+                        units="L",
                         precision=0,
                         position=30,
                     ),
@@ -80,6 +86,7 @@ class FlowMeterUI(ui.UI):
                         "Current Event Peak Flow",
                         value=FlowMeterTags.event_peak_flow,
                         name="event_peak_flow",
+                        units="L/hr",
                         precision=1,
                         position=40,
                     ),

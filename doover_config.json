@@ -393,6 +393,7 @@
                                     "form": "radialGauge",
                                     "position": 10,
                                     "hidden": false,
+                                    "units": "L/hr",
                                     "varType": "float",
                                     "currentValue": "$tag.app().flow_rate:number:0.0",
                                     "decPrecision": 1,
@@ -428,6 +429,7 @@
                                     "showActivity": true,
                                     "position": 20,
                                     "hidden": false,
+                                    "units": "L",
                                     "varType": "float",
                                     "currentValue": "$tag.app().totaliser:number:0.0",
                                     "decPrecision": 0,
@@ -478,6 +480,7 @@
                                     "showActivity": true,
                                     "position": 30,
                                     "hidden": false,
+                                    "units": "L",
                                     "varType": "float",
                                     "currentValue": "$tag.app().event_volume:number:0.0",
                                     "decPrecision": 0
@@ -489,6 +492,7 @@
                                     "showActivity": true,
                                     "position": 40,
                                     "hidden": false,
+                                    "units": "L/hr",
                                     "varType": "float",
                                     "currentValue": "$tag.app().event_peak_flow:number:0.0",
                                     "decPrecision": 1
