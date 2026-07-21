@@ -165,6 +165,35 @@ def test_pulse_rate_smoothing():
     assert 1000 < sum(tail) / len(tail) < 1400, "rate should average near 1200 L/hr"
 
 
+def test_resolve_pulse_source_vi_mapping():
+    """DI pins 4/5 route to VI pulse counting on AI pins 0/1 with a threshold edge.
+
+    Plain DI pins pass straight through with their rising/falling edge.
+    """
+    from types import SimpleNamespace
+
+    from analog_flow_meter.application import FlowMeterApplication
+
+    val = lambda v: SimpleNamespace(value=v)  # noqa: E731
+
+    def resolve(di_pin, edge, threshold=10.0):
+        app = object.__new__(FlowMeterApplication)
+        app.config = SimpleNamespace(
+            di_pin=val(di_pin),
+            pulse_edge=val(edge),
+            vi_pulse_threshold=val(threshold),
+        )
+        return app._resolve_pulse_source()
+
+    # Plain DI edge counter: pin and edge unchanged, not VI.
+    assert resolve(0, "rising") == (0, "rising", False)
+    assert resolve(2, "falling") == (2, "falling", False)
+
+    # DI 4/5 -> AI 0/1, edge encodes the signed threshold, flagged as VI.
+    assert resolve(4, "rising", 10.0) == (0, "VI+10.0", True)
+    assert resolve(5, "falling", 9.5) == (1, "VI-9.5", True)
+
+
 def test_format_duration():
     from analog_flow_meter.application import FlowMeterApplication
 

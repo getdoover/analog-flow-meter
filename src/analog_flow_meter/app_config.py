@@ -114,7 +114,10 @@ class FlowMeterConfig(config.Schema):
         "Digital Input Pin",
         default=0,
         minimum=0,
-        description="[Pulse mode] Digital input pin the meter's pulse output is wired to.",
+        description="[Pulse mode] Digital input pin the meter's pulse output is wired to. "
+        "Pins 4 and 5 are voltage-input (VI) pulse counters wired to analog inputs 0 "
+        "and 1: the firmware polls the voltage and emits a pulse on each step change "
+        "(see Voltage Pulse Threshold), rather than counting a hardware digital edge.",
     )
     k_factor = config.Number(
         "K-Factor (pulses per unit)",
@@ -128,6 +131,15 @@ class FlowMeterConfig(config.Schema):
         choices=["rising", "falling"],
         default="rising",
         description="[Pulse mode] Signal edge that constitutes one pulse.",
+    )
+    vi_pulse_threshold = config.Number(
+        "Voltage Pulse Threshold",
+        default=10.0,
+        minimum=0,
+        description="[Pulse mode, DI pins 4-5 only] Voltage step (volts) between "
+        "consecutive ~0.5s samples that registers as one pulse on a VI pulse counter. "
+        "Rising vs falling step follows the Pulse Edge setting. Set below your pulse "
+        "output's voltage swing (e.g. ~10 for a 0/24V pulse).",
     )
     pulse_rate_window = config.Number(
         "Pulse Rate Averaging Window",

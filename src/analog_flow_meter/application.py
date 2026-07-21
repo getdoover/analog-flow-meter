@@ -66,16 +66,39 @@ class FlowMeterApplication(Application):
         if self.config.power_pin.value is not None:
             await self.platform_iface.set_do(int(self.config.power_pin.value), True)
 
-    async def _setup_pulse_mode(self):
+    def _resolve_pulse_source(self):
+        """Resolve the configured pulse input to a (pin, edge, is_vi) triple.
+
+        DI pins 4 and 5 on the Doovit aren't hardware digital-edge counters —
+        they're *voltage-input* pulse counters mapped to analog inputs 0 and 1.
+        For those we count on the AI pin (di_pin - 4) and encode the threshold in
+        the edge string ("VI+10.0" for a rising step, "VI-10.0" for a falling
+        one); the firmware polls the AI ~every 0.5s and emits a pulse whenever the
+        sample-to-sample voltage step exceeds the threshold. Any other pin is a
+        normal DI edge counter and keeps its plain "rising"/"falling" edge.
+        """
         cfg = self.config
         pin = int(cfg.di_pin.value)
         edge = cfg.pulse_edge.value
+        if pin in (4, 5):
+            sign = "+" if edge == "rising" else "-"
+            vi_edge = f"VI{sign}{cfg.vi_pulse_threshold.value}"
+            return pin - 4, vi_edge, True
+        return pin, edge, False
+
+    async def _setup_pulse_mode(self):
+        pin, edge, is_vi = self._resolve_pulse_source()
+        if is_vi:
+            log.info(
+                "Pulse mode: voltage-input counter on AI pin %d (edge %s)", pin, edge
+            )
 
         # Recover pulses missed while the app was down (best effort). Only when
         # we've run before (last_pulse_dt set) so a fresh start doesn't replay
-        # the entire event history.
+        # the entire event history. VI (analog) pulses aren't logged as DI events,
+        # so there's nothing to replay for them — skip recovery.
         last_dt = self.tags.last_pulse_dt.get()
-        if last_dt:
+        if last_dt and not is_vi:
             try:
                 _synced, events = await self.platform_iface.fetch_di_events(
                     pin, edge, events_from=int(last_dt * 1000)
@@ -95,6 +118,7 @@ class FlowMeterApplication(Application):
         self._pulse_samples = deque()
 
         # Seed the live counter so it continues the lifetime count, then listen.
+        # For a VI source, `pin` is the AI pin and `edge` carries the threshold.
         self.platform_iface.start_di_pulse_listener(
             pin, self.on_pulse, edge, start_count=self._prev_pulse_count
         )

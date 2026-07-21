@@ -38,6 +38,13 @@ tests/               # pytest suite (schema, UI, scaling/totaliser maths)
   lifetime `pulse_count`; the totaliser is **derived** as
   `(pulse_count − pulse_offset) / k_factor × calibration`. Missed pulses are
   recovered on restart via `fetch_di_events`.
+  - **VI (voltage-input) pulse counting**: DI pins **4 and 5** aren't hardware
+    edge counters — they're voltage-input counters on **AI pins 0 and 1**.
+    `_resolve_pulse_source()` maps `di_pin 4/5 → AI 0/1` and encodes the
+    `vi_pulse_threshold` in the edge string (`"VI+<v>"` rising / `"VI-<v>"`
+    falling). The firmware polls the AI ~every 0.5s and emits a pulse when the
+    sample-to-sample voltage **step** exceeds the threshold. Offline recovery is
+    skipped for VI (no DI event log to replay).
 - **Rate display** is volume per configurable time base (default `L/hr`); the
   radial gauge range is calibrated to `maximum_flow` at runtime in `UI.setup()`.
 - **Simulation**: when `simulator_app_key` is set, flow is read from that app's

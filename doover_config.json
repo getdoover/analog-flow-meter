@@ -212,7 +212,7 @@
                         "null"
                     ],
                     "x-required": false,
-                    "description": "[Pulse mode] Digital input pin the meter's pulse output is wired to.",
+                    "description": "[Pulse mode] Digital input pin the meter's pulse output is wired to. Pins 4 and 5 are voltage-input (VI) pulse counters wired to analog inputs 0 and 1: the firmware polls the voltage and emits a pulse on each step change (see Voltage Pulse Threshold), rather than counting a hardware digital edge.",
                     "default": 0,
                     "x-position": 13,
                     "minimum": 0
@@ -248,6 +248,20 @@
                     "default": "rising",
                     "x-position": 15
                 },
+                "voltage_pulse_threshold": {
+                    "title": "Voltage Pulse Threshold",
+                    "x-name": "voltage_pulse_threshold",
+                    "x-hidden": false,
+                    "type": [
+                        "number",
+                        "null"
+                    ],
+                    "x-required": false,
+                    "description": "[Pulse mode, DI pins 4-5 only] Voltage step (volts) between consecutive ~0.5s samples that registers as one pulse on a VI pulse counter. Rising vs falling step follows the Pulse Edge setting. Set below your pulse output's voltage swing (e.g. ~10 for a 0/24V pulse).",
+                    "default": 10.0,
+                    "x-position": 16,
+                    "minimum": 0
+                },
                 "pulse_rate_averaging_window": {
                     "title": "Pulse Rate Averaging Window",
                     "x-name": "pulse_rate_averaging_window",
@@ -259,7 +273,7 @@
                     "x-required": false,
                     "description": "[Pulse mode] Seconds of pulses to average when computing the displayed flow rate. Larger values smooth a jumpy gauge at low flow; smaller values respond faster. Does not affect the totaliser.",
                     "default": 10.0,
-                    "x-position": 16,
+                    "x-position": 17,
                     "minimum": 0
                 },
                 "totaliser_calibration_factor": {
@@ -273,7 +287,7 @@
                     "x-required": false,
                     "description": "Multiplier applied to the totaliser to trim it against a reference meter (1.0 = no adjustment).",
                     "default": 1.0,
-                    "x-position": 17,
+                    "x-position": 18,
                     "minimum": 0
                 },
                 "totaliser_decimal_precision": {
@@ -287,7 +301,7 @@
                     "x-required": false,
                     "description": "Decimal places shown for the totaliser and event volumes. Increase for small-volume units like m3 or kL.",
                     "default": 0,
-                    "x-position": 18,
+                    "x-position": 19,
                     "minimum": 0
                 },
                 "event_flow_threshold": {
@@ -301,7 +315,7 @@
                     "x-required": false,
                     "description": "Flow rate (units per time base) above which a flow session is considered active. Set this above your sensor's zero/noise floor \u2014 with analog sensors, leaving it at 0 keeps a session open forever on baseline noise (flow rarely reads exactly zero).",
                     "default": 1.0,
-                    "x-position": 19,
+                    "x-position": 20,
                     "minimum": 0
                 },
                 "event_timeout_minutes": {
@@ -315,7 +329,7 @@
                     "x-required": false,
                     "description": "Minutes of flow at or below the threshold before an active flow session is closed and recorded.",
                     "default": 5.0,
-                    "x-position": 20,
+                    "x-position": 21,
                     "minimum": 0
                 },
                 "simulator_app_key": {
@@ -330,7 +344,7 @@
                     "x-required": false,
                     "description": "Optional: app key of a simulator publishing a 'sim_flow_rate' tag. When set, flow is read from that tag instead of hardware (local testing).",
                     "default": null,
-                    "x-position": 21
+                    "x-position": 22
                 },
                 "dv_app_position": {
                     "title": "Position",
@@ -343,7 +357,7 @@
                     "x-required": false,
                     "description": "Position of Application in UI Structure. Smaller numbers are closer to the top.",
                     "default": 100,
-                    "x-position": 22,
+                    "x-position": 23,
                     "minimum": 0
                 }
             },
