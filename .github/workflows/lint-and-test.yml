@@ -18,3 +18,8 @@ jobs:
     uses: ./.github/workflows/run-tests.yml
     secrets: inherit
 #    needs: lint
+
+  validate:
+    name: Validate Schemas
+    uses: ./.github/workflows/validate-schema.yml
+    secrets: inherit

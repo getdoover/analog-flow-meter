@@ -266,9 +266,7 @@ class FlowMeterApplication(Application):
         await self.session.stop_flow()
         await self.tags.flow_active.set(False)
         await self.tags.last_event_summary.set(summary)
-        await self.create_message(
-            "significantEvent", {"text": f"Flow event: {summary}"}
-        )
+        await self.send_notification(f"Flow event: {summary}")
 
         await self.tags.event_started.set(None)
         await self.tags.event_volume.set(0.0)
@@ -297,7 +295,6 @@ class FlowMeterApplication(Application):
         ):
             await self.tags.pulse_offset.set(self.tags.pulse_count.get() or 0)
         await self.tags.totaliser.set(0.0)
-        await ctx.set_value(None)
 
     @ui.handler("reset_event")
     async def on_reset_event(self, ctx, value):
@@ -309,4 +306,3 @@ class FlowMeterApplication(Application):
         await self.tags.event_volume.set(0.0)
         await self.tags.event_peak_flow.set(0.0)
         self._below_since = None
-        await ctx.set_value(None)

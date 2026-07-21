@@ -31,6 +31,11 @@ jobs:
     uses: ./.github/workflows/run-tests.yml
     secrets: inherit
 
+  validate:
+    name: Validate Schemas
+    uses: ./.github/workflows/validate-schema.yml
+    secrets: inherit
+
   smoke_test:
     name: Smoke Test (container runs)
     runs-on: ubuntu-latest
@@ -53,9 +58,14 @@ jobs:
 
   push_to_registries:
     name: Push Docker Image
-    needs: [lint, test, smoke_test]
-    if: ${{ github.event_name != 'pull_request' && (needs.test.result == 'success' && needs.smoke_test.result == 'success' || (github.event_name == 'workflow_dispatch' &&  github.event.inputs.confirmation == 'true')) }}
+    needs: [lint, test, validate, smoke_test]
+    # Runs on pull requests too: the resulting version is published as an alpha
+    # (see the release job) so it never auto-selects as "Latest". Push only when
+    # the checks pass, unless a workflow_dispatch explicitly overrides.
+    if: ${{ (needs.test.result == 'success' && needs.validate.result == 'success' && needs.smoke_test.result == 'success') || (github.event_name == 'workflow_dispatch' && github.event.inputs.confirmation == 'true') }}
     runs-on: ubuntu-latest
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
     permissions:
       packages: write
       contents: read
@@ -101,6 +111,56 @@ jobs:
           COSIGN_EXPERIMENTAL: "1"
           DIGEST: ${{ steps.push.outputs.digest }}
         run: |
+          # Sign by digest (covers every tag pointing at this manifest) with
+          # the tlog upload disabled so the app controller can verify fully
+          # offline on edge devices.
           cosign sign --yes --tlog-upload=false --registry-referrers-mode oci-1-1 \
             --key env://COSIGN_PRIVATE_KEY \
             "${REGISTRY}/${IMAGE_NAME}@${DIGEST}"
+
+  release:
+    name: Release to Doover (${{ matrix.environment }})
+    needs: push_to_registries
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      fail-fast: false # one environment failing must not block the other
+      matrix:
+        include:
+          - environment: staging
+            control_api: https://api.staging.udoover.com
+          - environment: production
+            control_api: https://api.doover.com
+    env:
+      DOOVER_CONTROL_API_BASE_URL: ${{ matrix.control_api }}
+      DOOVER_OIDC_AUDIENCE: ${{ matrix.control_api }}
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Doover CLI
+        run: uv tool install doover-cli
+
+      - name: Publish app metadata to Doover
+        run: doover app publish --app-name analog_flow_meter
+
+      - name: Release a new application version
+        env:
+          RELEASE_NOTES: ${{ github.event.head_commit.message || github.event.pull_request.title }}
+        run: >-
+          doover app release
+          --app-name analog_flow_meter
+          --digest "${{ needs.push_to_registries.outputs.digest }}"
+          --commit "${{ github.event.pull_request.head.sha || github.sha }}"
+          --notes "$RELEASE_NOTES"
+          ${{ github.event_name == 'pull_request' && '--alpha' || '' }}
