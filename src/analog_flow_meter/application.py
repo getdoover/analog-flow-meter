@@ -12,6 +12,11 @@ from .app_state import FlowSessionState
 
 log = logging.getLogger(__name__)
 
+# Firmware default VI (voltage-input) poll rate, in seconds. When the configured
+# rate matches this we omit the "@<poll>" edge suffix so the wire format stays
+# byte-compatible with platform interfaces that predate the suffix.
+_DEFAULT_VI_POLL = 0.4
+
 
 class FlowMeterApplication(Application):
     config_cls = FlowMeterConfig
@@ -83,6 +88,13 @@ class FlowMeterApplication(Application):
         if pin in (4, 5):
             sign = "+" if edge == "rising" else "-"
             vi_edge = f"VI{sign}{cfg.vi_pulse_threshold.value}"
+            # The firmware poll rate rides in the edge string as an optional
+            # "@<seconds>" suffix. Only append it when it differs from the
+            # firmware default, so the common case stays compatible with older
+            # platform interfaces that parse the threshold without the suffix.
+            poll = cfg.vi_poll_rate.value
+            if poll and poll != _DEFAULT_VI_POLL:
+                vi_edge = f"{vi_edge}@{poll}"
             return pin - 4, vi_edge, True
         return pin, edge, False
 

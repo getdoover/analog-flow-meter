@@ -141,6 +141,15 @@ class FlowMeterConfig(config.Schema):
         "Rising vs falling step follows the Pulse Edge setting. Set below your pulse "
         "output's voltage swing (e.g. ~10 for a 0/24V pulse).",
     )
+    vi_poll_rate = config.Number(
+        "VI Poll Rate",
+        default=0.4,
+        minimum=0.05,
+        description="[Pulse mode, DI pins 4-5 only] How often (seconds) the firmware "
+        "samples the voltage input to detect pulses. Lower captures shorter/faster "
+        "pulses (default 0.4s; e.g. 0.1 for 100ms). Requires platform firmware that "
+        "supports a configurable VI poll rate; ignored otherwise (falls back to 0.4s).",
+    )
     pulse_rate_window = config.Number(
         "Pulse Rate Averaging Window",
         default=10.0,

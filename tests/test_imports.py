@@ -176,12 +176,13 @@ def test_resolve_pulse_source_vi_mapping():
 
     val = lambda v: SimpleNamespace(value=v)  # noqa: E731
 
-    def resolve(di_pin, edge, threshold=10.0):
+    def resolve(di_pin, edge, threshold=10.0, poll=0.4):
         app = object.__new__(FlowMeterApplication)
         app.config = SimpleNamespace(
             di_pin=val(di_pin),
             pulse_edge=val(edge),
             vi_pulse_threshold=val(threshold),
+            vi_poll_rate=val(poll),
         )
         return app._resolve_pulse_source()
 
@@ -190,8 +191,13 @@ def test_resolve_pulse_source_vi_mapping():
     assert resolve(2, "falling") == (2, "falling", False)
 
     # DI 4/5 -> AI 0/1, edge encodes the signed threshold, flagged as VI.
+    # Default poll rate (0.4) omits the suffix for backward compatibility.
     assert resolve(4, "rising", 10.0) == (0, "VI+10.0", True)
     assert resolve(5, "falling", 9.5) == (1, "VI-9.5", True)
+
+    # A non-default poll rate rides in the edge string as an "@<seconds>" suffix.
+    assert resolve(4, "rising", 10.0, poll=0.1) == (0, "VI+10.0@0.1", True)
+    assert resolve(5, "falling", 9.5, poll=0.05) == (1, "VI-9.5@0.05", True)
 
 
 def test_format_duration():
