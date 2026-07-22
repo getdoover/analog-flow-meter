@@ -129,8 +129,8 @@ jobs:
       fail-fast: false # one environment failing must not block the other
       matrix:
         include:
-          - environment: staging
-            control_api: https://api.staging.udoover.com
+#          - environment: staging
+#            control_api: https://api.staging.udoover.com
           - environment: production
             control_api: https://api.doover.com
     env:
