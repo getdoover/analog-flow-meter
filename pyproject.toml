@@ -5,7 +5,7 @@ description = "Doover device app for analog / pulse flow meters"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "pydoover>=1.15.0",
+    "pydoover>=1.15.1",
     "transitions>=0.9.2",
 ]
 
