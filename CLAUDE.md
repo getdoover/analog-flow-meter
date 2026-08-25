@@ -34,10 +34,24 @@ tests/               # pytest suite (schema, UI, scaling/totaliser maths)
 - **Analog**: `platform_iface.fetch_ai(pin)` → linear scale (`scale_analog`) between
   configured signal/flow endpoints → flow rate; the totaliser **integrates**
   `rate × dt`.
-- **Pulse**: `platform_iface.start_di_pulse_listener(pin, on_pulse, edge)` keeps a
-  lifetime `pulse_count`; the totaliser is **derived** as
-  `(pulse_count − pulse_offset) / k_factor × calibration`. Missed pulses are
-  recovered on restart via `fetch_di_events`.
+- **Pulse**: keeps a lifetime `pulse_count`; the totaliser is **derived** as
+  `(pulse_count − pulse_offset) / k_factor × calibration`.
+  - **`pulse_source` config** picks how the count arrives: `Auto` (default),
+    `Hardware Counter`, or `Live Events`.
+  - **Hardware Counter** — `_poll_hardware_counter()` reads
+    `platform_iface.fetch_di_readings(pin)` each cycle and folds the *delta* into
+    `pulse_count`. Never adopts the device's value directly: `pulse_count` must
+    stay monotonic (the totaliser and its reset offset derive from it) across a
+    counter that may wrap (u32) or restart at zero on device reboot —
+    `_counter_delta()` owns that. The last raw value persists as `hw_pulse_count`
+    so the first poll after a restart credits pulses missed while down.
+  - **Live Events** — `start_di_pulse_listener(pin, on_pulse, edge)`; missed
+    pulses recovered on restart via `fetch_di_events`.
+  - **`Auto`** probes the pin with `fetch_di_readings` at setup and uses the
+    counter if `pulse_count is not None`. Probes the pin rather than reading
+    advertised capabilities, so it also works against platform interfaces whose
+    metadata predates the fields. An ELPRO Quantum has counters and **no** live
+    events, so events mode reports no flow there.
   - **VI (voltage-input) pulse counting**: DI pins **4 and 5** aren't hardware
     edge counters — they're voltage-input counters on **AI pins 0 and 1**.
     `_resolve_pulse_source()` maps `di_pin 4/5 → AI 0/1` and encodes the
@@ -47,7 +61,9 @@ tests/               # pytest suite (schema, UI, scaling/totaliser maths)
     (`vi_poll_rate`, default 0.4s) rides in the edge string as an optional
     `@<seconds>` suffix (`"VI+10.0@0.1"`); it's omitted at the default so the
     format stays compatible with platform interfaces that predate the suffix.
-    Offline recovery is skipped for VI (no DI event log to replay).
+    Offline recovery is skipped for VI (no DI event log to replay), and VI pins
+    always use Live Events — a VI pulse is a polled voltage step, not a digital
+    edge, so no hardware counter backs it.
 - **Rate display** is volume per configurable time base (default `L/hr`); the
   radial gauge range is calibrated to `maximum_flow` at runtime in `UI.setup()`.
 - **Simulation**: when `simulator_app_key` is set, flow is read from that app's

@@ -9,6 +9,25 @@ class MeterMode:
     PULSE = "Pulse"
 
 
+class PulseSource:
+    """How pulse mode gets its count from the platform.
+
+    Two mechanisms exist and not every platform has both:
+
+    ``COUNTER`` polls a hardware totaliser through the platform interface. The
+    count lives on the device, so it keeps counting while this app is restarting
+    or updating, and nothing is lost to a missed callback.
+
+    ``EVENTS`` subscribes to a live per-pulse stream. It gives per-pulse timing
+    the counter cannot, but it needs an edge source: an ELPRO Quantum has
+    counters and no edge stream at all, so this mode reports no flow there.
+    """
+
+    AUTO = "Auto"
+    COUNTER = "Hardware Counter"
+    EVENTS = "Live Events"
+
+
 class TimeBase:
     """Flow-rate time bases and how many seconds each represents.
 
@@ -125,6 +144,18 @@ class FlowMeterConfig(config.Schema):
         minimum=0,
         description="[Pulse mode] Pulses emitted per one unit of volume, from the "
         "meter's spec sheet. Volume = pulses / K-factor.",
+    )
+    pulse_source = config.Enum(
+        "Pulse Source",
+        choices=[PulseSource.AUTO, PulseSource.COUNTER, PulseSource.EVENTS],
+        default=PulseSource.AUTO,
+        description="[Pulse mode] Where the pulse count comes from. Auto asks the "
+        "platform for a hardware counter on this pin and uses it if there is one, "
+        "falling back to live pulse events. Hardware Counter keeps counting while "
+        "this app restarts and is the only option that works on an ELPRO Quantum, "
+        "which has no live pulse events. Live Events gives per-pulse timing. VI "
+        "pins (4-5) always use Live Events - a VI pulse is a voltage step, not a "
+        "digital edge, so no hardware counter backs it.",
     )
     pulse_edge = config.Enum(
         "Pulse Edge",

@@ -22,6 +22,41 @@ It supports two measurement paradigms, selectable by config:
 - **Pulse** — counts pulses on a digital input pin and converts them to volume
   using a K-factor (pulses per unit). The flow rate is derived from the pulse rate.
 
+### Where pulse mode gets its count
+
+Two mechanisms exist, and not every platform has both. `Pulse Source` picks
+between them; the default, `Auto`, asks the pin itself and uses whatever is
+there.
+
+| Source | How it works | Trade-off |
+|---|---|---|
+| `Hardware Counter` | Polls a totaliser on the device through the platform interface | The count lives on the device, so it keeps running while this app restarts or updates — nothing is lost to a missed callback or an outage. No per-pulse timing. |
+| `Live Events` | Subscribes to a per-pulse stream | Per-pulse timing, and pulses arrive as they happen. Needs an edge source, which not every platform has. |
+
+`Auto` probes the pin once at startup and takes the hardware counter if one
+answers, falling back to live events otherwise. It probes the pin rather than
+reading the platform's advertised capabilities: what matters is whether a count
+comes back *now*, and a direct read also works against platform interfaces whose
+capability metadata predates these fields.
+
+Two cases worth knowing:
+
+- **An ELPRO Quantum has counters and no live pulse events at all.** `Live Events`
+  reports no flow there, so `Auto` (or `Hardware Counter`) is the only thing that
+  works. DIO1–4 count; DIO5–8 have no counter.
+- **VI pins (DI 4–5) always use live events.** A VI pulse is a voltage step the
+  firmware detects by polling an analog input, not a digital edge, so no hardware
+  counter backs it however the option is set.
+
+On the hardware-counter source the app keeps its own monotonic `pulse_count` and
+folds in the *delta* from the device each cycle, rather than adopting the device's
+value directly — the totaliser and its reset offset are both derived from
+`pulse_count`, so it has to stay monotonic across a counter that may wrap (u32) or
+restart from zero when the device reboots. A counter going backwards re-baselines
+and loses the pulses across the gap rather than crediting billions of phantom ones.
+The last raw reading is persisted as `hw_pulse_count`, which is what lets the first
+poll after a restart credit everything that happened while the app was down.
+
 The flow rate and totaliser are published as **live** tags for other apps to
 consume, the main radial gauge is calibrated to your configured maximum flow,
 and discrete **flow sessions** (events) are tracked on a separate UI tab.
@@ -56,7 +91,8 @@ Configuration fields are declared in [`src/analog_flow_meter/app_config.py`](src
 **Analog mode** — `Analog Input Pin`, `Signal at Minimum/Maximum Flow` (e.g. 4 / 20 mA),
 `Flow at Minimum/Maximum Signal`, `Signal Deadband`, optional `Sensor Power Pin`.
 
-**Pulse mode** — `Digital Input Pin`, `K-Factor (pulses per unit)`, `Pulse Edge`.
+**Pulse mode** — `Digital Input Pin`, `K-Factor (pulses per unit)`, `Pulse Edge`,
+`Pulse Source` (see above).
 
 **Events** — `Event Flow Threshold` (rate above which a session is active) and
 `Event Timeout (minutes)` (no-flow duration before a session closes).

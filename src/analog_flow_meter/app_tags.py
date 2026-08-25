@@ -15,6 +15,12 @@ class FlowMeterTags(Tags):
     pulse_offset = Tag("number", default=0)
     # epoch seconds of the last pulse
     last_pulse_dt = Tag("number", default=None)
+    # pulse (hardware-counter source): the last raw counter value read off the
+    # device. Persisted so a restart can credit the pulses that arrived while
+    # this app was down - the whole point of counting on the device rather than
+    # in here. Distinct from pulse_count, which stays this app's own monotonic
+    # lifetime tally and is what the totaliser is derived from.
+    hw_pulse_count = Tag("number", default=None)
     # analog: drives the "signal out of range" warning (True = hidden / healthy)
     sensor_fault_hidden = Tag("boolean", default=True)
 

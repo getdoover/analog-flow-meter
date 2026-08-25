@@ -230,3 +230,196 @@ def test_ui_export(tmp_path):
     ui_schema = data["analog_flow_meter"]["ui_schema"]
     assert ui_schema["type"] == "uiApplication"
     assert "tabs" in ui_schema["children"]
+
+
+# --- Hardware pulse counter source -----------------------------------------
+
+
+def _counter_app(pulse_source, readings=None, raise_with=None, is_vi=False):
+    """A FlowMeterApplication wired to a canned platform interface."""
+    from types import SimpleNamespace
+
+    from analog_flow_meter.application import FlowMeterApplication
+
+    app = object.__new__(FlowMeterApplication)
+    app.config = SimpleNamespace(pulse_source=SimpleNamespace(value=pulse_source))
+
+    class FakeIface:
+        def __init__(self):
+            self.calls = []
+
+        async def fetch_di_readings(self, pin):
+            self.calls.append(pin)
+            if raise_with is not None:
+                raise raise_with
+            return readings
+
+    app.platform_iface = FakeIface()
+    return app
+
+
+def _reading(pin, value=True, pulse_count=None, pulse_rate_hz=None):
+    from pydoover.docker.platform.platform_types import DIReading
+
+    return DIReading(
+        pin=pin, value=value, pulse_count=pulse_count, pulse_rate_hz=pulse_rate_hz
+    )
+
+
+def test_auto_uses_the_hardware_counter_when_the_pin_has_one():
+    from analog_flow_meter.app_config import PulseSource
+
+    app = _counter_app(PulseSource.AUTO, readings=[_reading(0, pulse_count=41233)])
+    assert asyncio.run(app._resolve_counter_source(0, is_vi=False)) is True
+
+
+def test_auto_falls_back_to_events_when_the_pin_cannot_count():
+    """A Doovit VI pin, or any platform without counters, still measures flow."""
+    from analog_flow_meter.app_config import PulseSource
+
+    app = _counter_app(PulseSource.AUTO, readings=[_reading(0, pulse_count=None)])
+    assert asyncio.run(app._resolve_counter_source(0, is_vi=False)) is False
+
+
+def test_a_zero_count_still_counts_as_supported():
+    """A brand new meter reads 0 pulses; that is a counter, not the absence of one."""
+    from analog_flow_meter.app_config import PulseSource
+
+    app = _counter_app(PulseSource.AUTO, readings=[_reading(0, pulse_count=0)])
+    assert asyncio.run(app._resolve_counter_source(0, is_vi=False)) is True
+
+
+def test_vi_pins_never_use_the_hardware_counter():
+    """A VI pulse is a voltage step the firmware polls for, not a digital edge."""
+    from analog_flow_meter.app_config import PulseSource
+
+    for source in (PulseSource.AUTO, PulseSource.COUNTER, PulseSource.EVENTS):
+        app = _counter_app(source, readings=[_reading(0, pulse_count=99)])
+        assert asyncio.run(app._resolve_counter_source(0, is_vi=True)) is False
+        # It must not even probe: on a VI pin the answer is structural.
+        assert app.platform_iface.calls == []
+
+
+def test_events_is_honoured_without_probing():
+    from analog_flow_meter.app_config import PulseSource
+
+    app = _counter_app(PulseSource.EVENTS, readings=[_reading(0, pulse_count=5)])
+    assert asyncio.run(app._resolve_counter_source(0, is_vi=False)) is False
+    assert app.platform_iface.calls == []
+
+
+def test_counter_forced_but_unavailable_falls_back():
+    from analog_flow_meter.app_config import PulseSource
+
+    app = _counter_app(PulseSource.COUNTER, readings=[_reading(0, pulse_count=None)])
+    assert asyncio.run(app._resolve_counter_source(0, is_vi=False)) is False
+
+
+def test_a_probe_failure_does_not_break_setup():
+    """An unreachable platform interface must not stop the app starting."""
+    from analog_flow_meter.app_config import PulseSource
+
+    app = _counter_app(PulseSource.AUTO, raise_with=RuntimeError("iface down"))
+    assert asyncio.run(app._resolve_counter_source(0, is_vi=False)) is False
+
+
+def test_old_pydoover_without_fetch_di_readings_falls_back():
+    from analog_flow_meter.app_config import PulseSource
+
+    app = _counter_app(PulseSource.AUTO, raise_with=AttributeError("no such method"))
+    assert asyncio.run(app._resolve_counter_source(0, is_vi=False)) is False
+
+
+def test_counter_delta_normal_progress():
+    from analog_flow_meter.application import FlowMeterApplication
+
+    assert FlowMeterApplication._counter_delta(100, 137) == 37
+    assert FlowMeterApplication._counter_delta(100, 100) == 0
+
+
+def test_counter_delta_first_poll_has_no_baseline():
+    """A fresh install must not import the device's lifetime total as flow."""
+    from analog_flow_meter.application import FlowMeterApplication
+
+    assert FlowMeterApplication._counter_delta(None, 41233) == 0
+
+
+def test_counter_delta_survives_a_u32_wrap():
+    from analog_flow_meter.application import FlowMeterApplication
+
+    assert FlowMeterApplication._counter_delta(2**32 - 3, 2) == 5
+
+
+def test_counter_delta_treats_a_device_restart_as_zero():
+    """Crediting 4 billion phantom pulses would be far worse than losing a few."""
+    from analog_flow_meter.application import FlowMeterApplication
+
+    assert FlowMeterApplication._counter_delta(5000, 3) == 0
+
+
+def test_hardware_counter_credits_pulses_missed_while_down():
+    """The point of counting on the device: an outage costs nothing.
+
+    The app stops at count 1000, the meter turns another 250 pulses, and the app
+    comes back. The first poll must credit all 250.
+    """
+    from types import SimpleNamespace
+
+    from analog_flow_meter.application import FlowMeterApplication
+
+    app = object.__new__(FlowMeterApplication)
+    app._pulse_pin = 1
+    app._prev_hw_count = 1000  # restored from the hw_pulse_count tag
+    store = {"pulse_count": 400, "hw": 1000, "last_dt": None}
+
+    async def fetch(pin):
+        return [_reading(1, pulse_count=1250)]
+
+    app.platform_iface = SimpleNamespace(fetch_di_readings=fetch)
+
+    def setter(key):
+        async def _set(v):
+            store[key] = v
+
+        return _set
+
+    app.tags = SimpleNamespace(
+        pulse_count=SimpleNamespace(get=lambda: store["pulse_count"], set=setter("pulse_count")),
+        hw_pulse_count=SimpleNamespace(get=lambda: store["hw"], set=setter("hw")),
+        last_pulse_dt=SimpleNamespace(set=setter("last_dt")),
+    )
+
+    asyncio.run(app._poll_hardware_counter())
+
+    # Lifetime count advanced by the full 250, not reset to the device's value.
+    assert store["pulse_count"] == 650
+    assert store["hw"] == 1250
+    assert store["last_dt"] is not None
+
+
+def test_hardware_counter_holds_steady_when_the_count_vanishes():
+    """A platform that stops reporting a count must not zero the totaliser."""
+    from types import SimpleNamespace
+
+    from analog_flow_meter.application import FlowMeterApplication
+
+    app = object.__new__(FlowMeterApplication)
+    app._pulse_pin = 0
+    app._prev_hw_count = 500
+    store = {"pulse_count": 120}
+
+    async def fetch(pin):
+        return [_reading(0, pulse_count=None)]
+
+    app.platform_iface = SimpleNamespace(fetch_di_readings=fetch)
+    app.tags = SimpleNamespace(
+        pulse_count=SimpleNamespace(
+            get=lambda: store["pulse_count"],
+            set=lambda v: (_ for _ in ()).throw(AssertionError("must not write")),
+        ),
+    )
+
+    asyncio.run(app._poll_hardware_counter())
+    assert store["pulse_count"] == 120
+    # The baseline is untouched, so the next good read measures from 500.
+    assert app._prev_hw_count == 500

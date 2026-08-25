@@ -5,7 +5,7 @@ from collections import deque
 from pydoover.docker import Application
 from pydoover import ui
 
-from .app_config import FlowMeterConfig, MeterMode, TimeBase
+from .app_config import FlowMeterConfig, MeterMode, PulseSource, TimeBase
 from .app_tags import FlowMeterTags
 from .app_ui import FlowMeterUI, _TIME_BASE_ABBREV
 from .app_state import FlowSessionState
@@ -16,6 +16,16 @@ log = logging.getLogger(__name__)
 # rate matches this we omit the "@<poll>" edge suffix so the wire format stays
 # byte-compatible with platform interfaces that predate the suffix.
 _DEFAULT_VI_POLL = 0.4
+
+# Hardware counters are unsigned 32-bit on some platforms (the ELPRO Quantum's
+# free-running counter wraps rather than resetting). A *decrease* is therefore
+# ambiguous - wrap, or the device rebooted and restarted from zero - so it is
+# read as a wrap only when the previous value was in the top eighth of the
+# range, which no realistic reboot lands in. Anything else re-baselines without
+# inventing volume, because crediting 4 billion phantom pulses to a totaliser is
+# far worse than losing the handful that straddled the reset.
+_COUNTER_MODULUS = 2**32
+_COUNTER_WRAP_THRESHOLD = _COUNTER_MODULUS - _COUNTER_MODULUS // 8
 
 
 class FlowMeterApplication(Application):
@@ -47,6 +57,10 @@ class FlowMeterApplication(Application):
         self._max_dt = max(self._loop_period * 10, 5.0)
 
         self._last_loop_time = None
+        # Set properly by _setup_pulse_mode; defined here so analog and sim
+        # modes have it too - _read_flow checks it on every cycle.
+        self._use_hw_counter = False
+        self._pulse_pin = None
         # Timestamp (epoch s) when flow first dropped to/below threshold; used to
         # close a session after the configured timeout. None while flowing.
         self._below_since = None
@@ -105,35 +119,113 @@ class FlowMeterApplication(Application):
                 "Pulse mode: voltage-input counter on AI pin %d (edge %s)", pin, edge
             )
 
-        # Recover pulses missed while the app was down (best effort). Only when
-        # we've run before (last_pulse_dt set) so a fresh start doesn't replay
-        # the entire event history. VI (analog) pulses aren't logged as DI events,
-        # so there's nothing to replay for them — skip recovery.
-        last_dt = self.tags.last_pulse_dt.get()
-        if last_dt and not is_vi:
-            try:
-                _synced, events = await self.platform_iface.fetch_di_events(
-                    pin, edge, events_from=int(last_dt * 1000)
-                )
-                if events:
-                    recovered = (self.tags.pulse_count.get() or 0) + len(events)
-                    await self.tags.pulse_count.set(recovered)
-                    log.info("Recovered %d pulse(s) missed while offline", len(events))
-            except Exception as e:  # noqa: BLE001 - recovery is best effort
-                log.warning("Could not recover missed pulses: %s", e)
+        self._pulse_pin = pin
+        self._use_hw_counter = await self._resolve_counter_source(pin, is_vi)
+
+        # Rolling (timestamp, count) samples for the smoothed flow-rate window.
+        self._pulse_samples = deque()
+        self._prev_hw_count = None
+
+        if self._use_hw_counter:
+            # The device has been counting the whole time this app was down, so
+            # there is nothing to recover from the event log - the first poll's
+            # delta covers the outage on its own.
+            self._prev_hw_count = self.tags.hw_pulse_count.get()
+            self._prev_pulse_count = self.tags.pulse_count.get() or 0
+            log.info("Pulse mode: polling the hardware counter on DI %d", pin)
+            return
+
+        await self._recover_missed_events(pin, edge, is_vi)
 
         # Per-loop pulse delta baseline (recovered pulses already land in the
         # totaliser via the derived total, so don't attribute them to a session).
         self._prev_pulse_count = self.tags.pulse_count.get() or 0
 
-        # Rolling (timestamp, count) samples for the smoothed flow-rate window.
-        self._pulse_samples = deque()
-
         # Seed the live counter so it continues the lifetime count, then listen.
         # For a VI source, `pin` is the AI pin and `edge` carries the threshold.
+        log.info("Pulse mode: listening for live pulse events on DI %d", pin)
         self.platform_iface.start_di_pulse_listener(
             pin, self.on_pulse, edge, start_count=self._prev_pulse_count
         )
+
+    async def _resolve_counter_source(self, pin, is_vi):
+        """Decide whether to read a hardware counter or listen for live pulses."""
+        source = self.config.pulse_source.value
+
+        if is_vi:
+            # A VI "pulse" is a voltage step the firmware detects by polling an
+            # analog input, not a digital edge, so no hardware counter backs it
+            # however the option is set.
+            if source == PulseSource.COUNTER:
+                log.warning(
+                    "Pulse Source is set to %s, but DI pins 4-5 are voltage-input "
+                    "counters with no hardware totaliser; using live events",
+                    PulseSource.COUNTER,
+                )
+            return False
+
+        if source == PulseSource.EVENTS:
+            return False
+
+        available = await self._hardware_counter_available(pin)
+        if available:
+            return True
+
+        if source == PulseSource.COUNTER:
+            # Explicitly asked for and not there. Fall back rather than report
+            # no flow at all, but say so loudly - on a platform with no live
+            # events either (an ELPRO Quantum) this app will now read nothing,
+            # and the log is the only place that will explain why.
+            log.error(
+                "Pulse Source is set to %s but DI %d has no hardware counter; "
+                "falling back to live pulse events",
+                PulseSource.COUNTER,
+                pin,
+            )
+        return False
+
+    async def _hardware_counter_available(self, pin):
+        """Probe the platform for a hardware counter on this pin.
+
+        Asks the pin itself rather than reading the platform's advertised
+        capabilities: what matters is whether a count comes back now, and a
+        direct read also works against platform interfaces whose capability
+        metadata predates these fields.
+        """
+        try:
+            readings = await self.platform_iface.fetch_di_readings(pin)
+        except AttributeError:
+            # pydoover predates fetch_di_readings.
+            log.info("Platform interface has no pulse-count support; using events")
+            return False
+        except Exception as e:  # noqa: BLE001 - probing must never break setup
+            log.warning("Could not probe DI %d for a hardware counter: %s", pin, e)
+            return False
+
+        return bool(readings) and readings[0].pulse_count is not None
+
+    async def _recover_missed_events(self, pin, edge, is_vi):
+        """Best-effort replay of pulses missed while the app was down.
+
+        Only for the live-events source: a hardware counter never stopped
+        counting, so its first delta already covers the gap. Only when we have
+        run before (last_pulse_dt set), so a fresh install does not replay the
+        entire event history. VI pulses are not logged as DI events, so there
+        is nothing to replay for them.
+        """
+        last_dt = self.tags.last_pulse_dt.get()
+        if not last_dt or is_vi:
+            return
+        try:
+            _synced, events = await self.platform_iface.fetch_di_events(
+                pin, edge, events_from=int(last_dt * 1000)
+            )
+            if events:
+                recovered = (self.tags.pulse_count.get() or 0) + len(events)
+                await self.tags.pulse_count.set(recovered)
+                log.info("Recovered %d pulse(s) missed while offline", len(events))
+        except Exception as e:  # noqa: BLE001 - recovery is best effort
+            log.warning("Could not recover missed pulses: %s", e)
 
     async def main_loop(self):
         now = time.time()
@@ -176,6 +268,8 @@ class FlowMeterApplication(Application):
             return self._integrate(max(0.0, float(rate)), dt)
 
         if cfg.mode.value == MeterMode.PULSE:
+            if self._use_hw_counter:
+                await self._poll_hardware_counter()
             return self._read_pulse(now, dt)
 
         return await self._read_analog(dt)
@@ -248,6 +342,63 @@ class FlowMeterApplication(Application):
         frac = (raw - signal_min) / (signal_max - signal_min)
         frac = min(max(frac, 0.0), 1.0)
         return flow_min + frac * (flow_max - flow_min)
+
+    # --- Hardware counter source --------------------------------------------
+
+    async def _poll_hardware_counter(self):
+        """Fold the device's counter into this app's lifetime pulse count.
+
+        The device's value is not used as the count directly: it is the *device's*
+        total, which may wrap, and which resets if the device reboots, whereas
+        ``pulse_count`` has to stay monotonic because the totaliser and the
+        totaliser-reset offset are both derived from it. So only the delta is
+        carried across.
+        """
+        try:
+            readings = await self.platform_iface.fetch_di_readings(self._pulse_pin)
+        except Exception as e:  # noqa: BLE001 - a bad poll must not kill the loop
+            log.warning("Could not read the pulse counter: %s", e)
+            return
+
+        raw = readings[0].pulse_count if readings else None
+        if raw is None:
+            # The counter went away mid-run (platform restarted into a state
+            # without it). Hold the count; the next poll may bring it back.
+            log.warning("DI %d reported no pulse count this cycle", self._pulse_pin)
+            return
+
+        raw = int(raw)
+        delta = self._counter_delta(self._prev_hw_count, raw)
+        self._prev_hw_count = raw
+        await self.tags.hw_pulse_count.set(raw)
+
+        if delta <= 0:
+            return
+
+        await self.tags.pulse_count.set((self.tags.pulse_count.get() or 0) + delta)
+        await self.tags.last_pulse_dt.set(time.time())
+
+    @staticmethod
+    def _counter_delta(previous, current):
+        """Pulses between two counter readings, or 0 if it restarted.
+
+        ``previous`` is None on the very first poll of a fresh install, where
+        there is no baseline to measure from and the device's lifetime total is
+        emphatically not this meter's.
+        """
+        if previous is None:
+            return 0
+        if current >= previous:
+            return current - previous
+        if previous >= _COUNTER_WRAP_THRESHOLD:
+            return (_COUNTER_MODULUS - previous) + current
+        log.warning(
+            "Pulse counter went backwards (%s -> %s); the device likely restarted. "
+            "Re-baselining - pulses across the gap are lost rather than guessed",
+            previous,
+            current,
+        )
+        return 0
 
     # --- Pulse callback -----------------------------------------------------
 
