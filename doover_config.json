@@ -8,7 +8,7 @@
         "allow_many": true,
         "description": "Read flow from an analog input or by counting digital pulses, with a calibratable totaliser and flow-event tracking.",
         "long_description": "README.md",
-        "depends_on": [],
+        "depends_on": ["platform_interface"],
         "organisation_id": null,
         "image_name": "registry.doover.com/apps/analog_flow_meter:main",
         "build_args": "--platform linux/amd64,linux/arm64"
